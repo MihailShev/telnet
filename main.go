@@ -3,13 +3,20 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
 	"net"
+	"os"
+	"time"
 )
 
-func main()  {
+func main() {
 	dialer := &net.Dialer{}
-	conn, err := dialer.Dial("tcp", "0.0.0.0:3001")
+	address, port := readArgs()
+
+	target := fmt.Sprintf("%s:%s", address, port)
+	conn, err := dialer.Dial("tcp", target)
 
 	if err != nil {
 		log.Fatal(err)
@@ -17,14 +24,70 @@ func main()  {
 
 	defer conn.Close()
 
-	fmt.Println("start connection to 0.0.0.0:3001")
+	fmt.Printf("Connect to %s\n", target)
 
-	_, err = conn.Write([]byte("GET /selection HTTP/1.1\r\n\r\n"))
+	input := make(chan string)
 
+	go readStdin(input)
+	go handle(conn)
 
-	if err != nil {
-		log.Fatal()
+	for m := range input {
+		_, err := conn.Write([]byte(m))
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
-		message, _ := bufio.NewReader(conn).ReadString('\n')
-		fmt.Println(message)
+}
+
+func handle(conn net.Conn) {
+	for {
+
+		message, err := ioutil.ReadAll(conn)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if len(message) > 0 {
+			fmt.Println("Received message:")
+			fmt.Println(string(message))
+		}
+
+		conn.SetReadDeadline(time.Now())
+
+		if _, err = conn.Read(make([]byte, 0)); err == io.EOF {
+			fmt.Println("Connection is closed")
+		} else {
+			fmt.Println("connection is live")
+			conn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+		}
+	}
+}
+
+func readArgs() (address string, port string) {
+	for i, arg := range os.Args {
+		switch {
+		case i == 1:
+			address = arg
+		case i == 2:
+			port = arg
+		case i > 2:
+			break
+		}
+	}
+
+	return
+}
+
+func readStdin(ch chan<- string) {
+	for {
+		reader := bufio.NewReader(os.Stdin)
+		message, err := reader.ReadString('\n')
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		ch <- message + "\r\n"
+	}
 }
